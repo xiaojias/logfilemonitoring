@@ -1,6 +1,6 @@
 pipeline {
   agent {
-    label ''
+    label 'aly'
   }
   stages {
     stage('Build Docker images') {
