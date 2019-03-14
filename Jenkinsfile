@@ -3,8 +3,9 @@ pipeline {
   stages {
     stage('Build Docker images') {
       agent any
+      }
       steps {
-        sh 'python -m py_compile sources/add2vals.py sources/calc.py sources/LogfileMonitor.py'
+        sh 'docker build -t richardx/python-35-centos:1.0 -f ./docker/docker-python/Dockerfile .'
       }
     }
   }
