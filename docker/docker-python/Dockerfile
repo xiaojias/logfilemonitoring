@@ -1,4 +1,6 @@
-FROM docker.io/centos/python-35-centos7
+#FROM docker.io/centos/python-35-centos7
+# Change to speed up
+FROM richardx/python-35-centos7:1.0
 
 MAINTAINER 649788479@qq.com
 
