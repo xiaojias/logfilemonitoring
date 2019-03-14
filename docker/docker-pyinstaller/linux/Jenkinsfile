@@ -1,0 +1,15 @@
+pipeline {
+  agent {
+    label 'aly'
+  }
+  stages {
+    stage('Build Docker images for PyInstaller') {
+      agent any
+      steps {
+        sh 'docker build -t richardx/pyinstaller-34-linux:1.0 -f ./Dockerfile .'
+        sh 'docker push richardx/pyinstaller-34-linux:1.0'
+        sh 'docker rmi richardx/pyinstaller-34-linux:1.0'
+      }
+    }
+  }
+}
