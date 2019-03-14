@@ -1,0 +1,12 @@
+pipeline {
+  agent {
+    label 'aly'
+  }
+  stages {
+    stage('Build Docker images') {
+      steps {
+        sh 'python -m py_compile sources/add2vals.py sources/calc.py sources/LogfileMonitor.py'
+      }
+    }
+  }
+}
