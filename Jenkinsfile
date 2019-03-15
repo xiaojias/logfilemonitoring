@@ -16,7 +16,7 @@ pipeline {
       steps {
         sh './build.sh'
         archiveArtifacts artifacts: 'src/dist/*', onlyIfSuccessful: true
-        archiveArtifacts artifacts: "Z:\src\dist\*", onlyIfSuccessful: true
+        /* archiveArtifacts artifacts: "Z:\src\dist\*", onlyIfSuccessful: true */
       }
     }
   }
