@@ -21,7 +21,7 @@ pipeline {
     stage('Post pachage') {
       agent any
       steps {
-        archiveArtifacts artifacts: 'src/dist/*', onlyIfSuccessful: true
+        archiveArtifacts artifacts: '/src/dist/*', onlyIfSuccessful: true
       }
     }
   }
