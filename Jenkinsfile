@@ -16,8 +16,12 @@ pipeline {
       steps {
         sh './build.sh'
         archiveArtifacts artifacts: '*', onlyIfSuccessful: true
+      }
+    }
+    stage('Post pachage') {
+      agent any
+      steps {
         archiveArtifacts artifacts: 'src/dist/*', onlyIfSuccessful: true
-        archiveArtifacts artifacts: 'Z:\\src\\dist\\*', onlyIfSuccessful: true
       }
     }
   }
