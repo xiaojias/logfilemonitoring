@@ -11,7 +11,7 @@ pipeline {
         sh 'echo "It is split of now!!!'
       }
     }
-    stage('Build Docker images') {
+    stage('Build pachage') {
       agent any
       steps {
         sh 'build.sh'
