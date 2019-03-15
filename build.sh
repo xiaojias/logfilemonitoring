@@ -1,3 +1,4 @@
+#!/bin/sh
 RELEASE="1.0"
 
 #PLATFORM="linux & win64"
