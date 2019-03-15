@@ -15,7 +15,7 @@ pipeline {
       agent any
       steps {
         sh './build.sh'
-        archiveArtifacts artifacts: 'dist/*', onlyIfSuccessful: true
+        archiveArtifacts artifacts: '/src/dist/*', onlyIfSuccessful: true
 
       }
     }
