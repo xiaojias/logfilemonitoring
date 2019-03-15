@@ -1,13 +1,10 @@
-#!/bin/sh
 RELEASE="1.0"
 
-PLATFORM="linux & win64"
-PYINSTALLER_IMG_VERSION="1.0"
+#PLATFORM="linux & win64"
+#PYINSTALLER_IMG_VERSION="1.0"
 num=`echo ${PLATFORM} | grep linux | wc -l`
-echo $num
 if [ $num == 1 ]; then
-  echo $num
-  for i in `ls *.py`
+  for i in `ls ./src/*.py`
   do
     docker run -v "$(pwd)/src:/src/" richardx/pyinstaller-34-linux:${PYINSTALLER_IMG_VERSION} "pyinstaller --onefile --clean $i"
   done
