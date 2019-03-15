@@ -14,7 +14,7 @@ pipeline {
     stage('Build pachage') {
       agent any
       steps {
-        sh 'build.sh'
+        sh './build.sh'
       }
     }
   }
