@@ -8,7 +8,9 @@ cd src
 if [ $num == 1 ]; then
   for i in `ls *.py`
   do
+    fname=`basename -s .py $i`
     docker run -v "$(pwd):/src/" richardx/pyinstaller-34-linux:${PYINSTALLER_IMG_VERSION} "pyinstaller --onefile --clean $i"
+    mv src/dist/$fname src/dist/${fname}"-"${RELEASE}
   done
 fi
 
@@ -16,7 +18,9 @@ num=`echo ${PLATFORM} | grep win64 | wc -l`
 if [ $num == 1 ]; then
   for i in `ls *.py`
   do
+    fname=`basename -s .py $i`
     docker run -v "$(pwd):/src/" richardx/pyinstaller-34-win64:${PYINSTALLER_IMG_VERSION} "pyinstaller --onefile --clean $i"
+    mv src/dist/${fname}".exe" src/dist/${fname}"-"${RELEASE}".exe"
   done
 fi
 
