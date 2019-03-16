@@ -11,11 +11,15 @@ pipeline {
         sh 'echo "It is split of now!!!"'
       }
     }
-    stage('Build pachage') {
+    stage('Build package') {
       agent any
       steps {
         sh './build.sh'
-        archiveArtifacts artifacts: '*', onlyIfSuccessful: true
+      }
+    }
+    stage('Publish package') {
+      agent any
+      steps {
         archiveArtifacts artifacts: 'src/dist/*', onlyIfSuccessful: true
       }
     }
