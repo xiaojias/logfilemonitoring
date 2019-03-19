@@ -1,8 +1,8 @@
 #!/bin/sh
 RELEASE="1.0"
 
-#PLATFORM="linux & win64"
-#PYINSTALLER_IMG_VERSION="1.0"
+PLATFORM="linux & win64"
+PYINSTALLER_IMG_VERSION="1.0"
 cd src
 num=`echo ${PLATFORM} | grep linux | wc -l`
 if [ $num == 1 ]; then
