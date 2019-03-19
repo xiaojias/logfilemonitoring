@@ -7,7 +7,12 @@ cd src
 num=`echo ${PLATFORM} | grep linux | wc -l`
 if [ $num == 1 ]; then
   DOCKER_IMG="richardx/pyinstaller-34-linux:${PYINSTALLER_IMG_VERSION}"
-  docker pull ${DOCKER_IMG}
+
+  num_img=`docker images -q ${DOCKER_IMG} | wc -l`
+  if [ $num_img == 0 ]; then
+    docker pull ${DOCKER_IMG}
+  fi
+
   for i in `ls *.py`
   do
     docker run -v "$(pwd):/src/" docker.io/${DOCKER_IMG} "pyinstaller --onefile --clean $i"
@@ -17,7 +22,12 @@ fi
 num=`echo ${PLATFORM} | grep win64 | wc -l`
 if [ $num == 1 ]; then
   DOCKER_IMG="richardx/pyinstaller-34-win64:${PYINSTALLER_IMG_VERSION}"
-  docker pull ${DOCKER_IMG}
+
+  num_img=`docker images -q ${DOCKER_IMG} | wc -l`
+  if [ $num_img == 0 ]; then
+    docker pull ${DOCKER_IMG}
+  fi
+  
   for i in `ls *.py`
   do
     docker run -v "$(pwd):/src/" docker.io/${DOCKER_IMG} "pyinstaller --onefile --clean $i"
