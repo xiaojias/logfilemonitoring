@@ -5,6 +5,7 @@
 # changes :                                                       #
 # 20190301-XJS : Initial   supports Python 3.5                    #
 # 20190408-XJS :           supports both RUN and READ mode        #
+# 20190412-XJS : 1.0       READ mode runs for once and then exit  #
 ###################################################################
 # Search the pattern from the monitored log file/s, and generate the output with defined format
 
@@ -15,8 +16,10 @@ import os
 import re
 import sys
 import time
-
+import subprocess
 import yaml
+
+VERSION = 1.0
 
 SCRIPT_NAME = os.path.basename(__file__)
 
@@ -31,17 +34,14 @@ PARAM_FILE, OUT_FILE, RC_FILE = \
 # define the output format
 OUT_SAMPLE = os.path.join(d, "LogfileMonitorOut.sample")
 
-# Monitor logfile in 1 minutes interval
-SCRIPT_INTERVAL_RUN = 1
+# Monitor logfile in 60 seconds interval
+SCRIPT_INTERVAL_RUN = 5
 
 # set default values for READ mode
 FORMAT_FILE, OUT_FILE, RC_FILE = \
     os.path.join(d, "LogfileMonitorReadFormat.yml"), \
     os.path.join(d, "LogfileMonitorOut.yml"), \
     os.path.join(d, "ReturnedCode.yml")
-
-# Monitor logfile in 1 minutes interval
-SCRIPT_INTERVAL_READ = 1
 
 ###
 DEBUG = "1"
@@ -85,6 +85,10 @@ def get_argv_dict(argv):
         if len(argv) >= 2:
             optd[argv[0]] = argv[1]
             argv = argv[2:]
+        elif argv[0] == "-v":
+            # "-v" has not any parameter following up
+            optd["-v"] = ""
+            argv = argv[1:]
         else:
             usage()
     return optd
@@ -101,56 +105,27 @@ def get_from_yaml(file):
     global OUT_ITEM_SAMPLE
     filed = {}
     # Will capture the data from file to a variable
-    logging.info("Capture the data of: (%s) to a variable" % file)
+    logging.info("Capture the data from file: (%s)" % file)
     try:
         with open(file) as f:
             filed = yaml.load(f)
     except IOError:
-        logging.error("RC=1, File access error: %s" % file)
+        logging.error("File access error: %s" % file)
 
-        OUT_ITEM_SAMPLE["rc"] = "1"
+        RC = 1
+        OUT_ITEM_SAMPLE["rc"] = RC
         write_data_outfile(OUT_ITEM_SAMPLE)  # Append the data into output file
         OUT_ITEM_SAMPLE["rc"] = ""
 
-    except:
-        logging.error("RC=99, File might not exactly apply YAML format: %s" % file)
-        logging.error(str(Exception))
-
-        OUT_ITEM_SAMPLE["rc"] = "99"
-        write_data_outfile(OUT_ITEM_SAMPLE)  # Append the data into output file
-        OUT_ITEM_SAMPLE["rc"] = ""
+    # except:
+    #     logging.error("RC=99, File might not exactly apply YAML format: %s" % file)
+    #     logging.error(str(Exception))
+    #
+    #     OUT_ITEM_SAMPLE["rc"] = "99"
+    #     write_data_outfile(OUT_ITEM_SAMPLE)  # Append the data into output file
+    #     OUT_ITEM_SAMPLE["rc"] = ""
 
     return filed
-
-
-def valid_param_data(data, mylist_out):
-    """
-    Validate the parameters defined in Parameters file
-    :param mylist_out:
-    :param data:
-    :return: update the contents of variable of mylist_out
-    """
-
-    for i in range(len(data)):
-        item = copy.deepcopy(data[i])
-
-        # Check the required parameters
-        required_list = ["logicalname", "logfilename"]
-        logging.info("TBD: will verify the list of required parameters:\n %s" % required_list)
-        for k in required_list:
-            if not item.get(k) or not item[k]:
-                # Not configured or NULL
-                print("Parameter is missing for: %s" % k)
-
-                # return error
-                print("Return error")
-
-        logging.info("TBD: will validate the parameters of:\n %s" % data)
-        pass
-        # e.g to fill the returned code to 3 with "invalid parameters" into mylist_out
-        mylist_out[0]["rc"] = "3"
-
-    return mylist_out
 
 
 def trans_pattern_logfile(mylist_1):
@@ -194,13 +169,13 @@ def trans_pattern_logfile(mylist_1):
 
                     mylist_2.append(copy.deepcopy(item_logfilename))
         if not match_yn:
+            RC = 21
             logging.error("No matched logfile for: %s" % item_logfilename["logfilename"])
             # write the wrong message to output
 
             OUT_ITEM_SAMPLE = copy.deepcopy(item_logfilename)
             # set the return code for "NO MATCHED LOGFILE FOUND"
-            OUT_ITEM_SAMPLE["rc"] = 21
-
+            OUT_ITEM_SAMPLE["rc"] = RC
             write_data_outfile(OUT_ITEM_SAMPLE)
 
     return mylist_2
@@ -252,6 +227,8 @@ def write_data_outfile(out_item):
     global OUT_FILE, RC_FILE
     # Get rcdesc relies on rc from RC_FILE file
     mylist_rc = get_from_yaml(RC_FILE)
+    # Check if the YAML file is valid (list data type)
+    valid_yaml_format(RC_FILE, mylist_rc, "list")
 
     return_code = str(out_item["rc"])  # while rc is interger data type
 
@@ -271,16 +248,21 @@ def write_data_outfile(out_item):
 
     # Update the output contents if there is relevant item from parameter file
     if not out_item.get("logeventtype"):
-        out_item["logeventtype"] = out_item["eventtype"]
+        out_item["logeventtype"] = out_item["eventtype"] if out_item.get("eventtype") else ""
 
     if not out_item.get("resource"):
         out_item["resource"] = "%s:%s:%s:%s" % \
-                               (out_item["logfilename"], out_item["eventtype"],
-                                out_item["logfield1"], out_item["logfield2"])
+                               (out_item["logfilename"] if out_item.get("logfilename") else "",
+                                out_item["eventtype"] if out_item.get("eventtype") else "",
+                                out_item["logfield1"] if out_item.get("logfield1") else "",
+                                out_item["logfield2"] if out_item.get("logfield2") else "")
 
     # if there is not any matched contents
     if not out_item.get("message"):
-        out_item["message"] = out_item["matched_contents"] if out_item.get("matched_contents") else "NULL"
+        out_item["message"] = out_item["matched_contents"] if out_item.get("matched_contents") else ""
+
+    if not out_item.get("tag"):
+        out_item["tag"] = out_item["responsible"] if out_item.get("responsible") else ""
 
     if not out_item.get("actualnumberofhits"):
         out_item["actualnumberofhits"] = 0
@@ -296,6 +278,11 @@ def write_data_outfile(out_item):
     with open(OUT_FILE, "a") as f:
         f.write(result)
 
+    # Script will exit while the rc is in the list
+    if return_code in ["1", "3", "4", "5"]:
+        logging.error("Script exit in code of %d with error: %s" % (int(return_code), out_item["rcdesc"]))
+        print("Script exit in code of %d with error: %s" % (int(return_code), out_item["rcdesc"]))
+        raise SystemExit(RC)
     return
 
 
@@ -336,33 +323,147 @@ def valid_para_config_file(mydict):
     :return: Null or a string of the invalid key/s
     """
     str1 = ""
+    script_exit = False
     # The required parameters
-    para = ["logfilename", "instance", "eventtype", "readtype", "rotation", "alarmonerror",
-            "alarmonerrorsev", "deduplicate", "occurences", "responsible", "logfield1", "logfield2"]
+    para = ["logfilename", "logicalname", "instance", "eventtype", "readtype", "rotation", "deduplicate", "occurences",
+            "responsible"]
+    #    para = ["logfilename", "logicalname", "instance", "eventtype", "readtype", "rotation", "alarmonerror", "alarmonerrorsev", "deduplicate", "occurences", "responsible", "logfield1", "logfield2"]
+
     str1 = check_required_parameters(mydict, para)
     if str1:
+        # script_exit = True
+        # RC = 5
         str1 = "Parameters are missing: %s" % str1
 
     # The Optional parameters
-    para2 = ["clearmatch", "sev1match", "sev2match", "sev3match",
-             "clearmap", "sev1map", "sev2map", "sev3map", "patternsearchtype"]
+    para2 = []
 
     str2 = check_valid_parameters(mydict, para + para2)
     if str2:
         str2 = "Parameters are invalid: %s" % str2
     str1 += " && %s" % str2
 
-    # The valid contents for specific fields
-    pass
+    # To validate the contents for specific fields
+    keys = mydict.keys()
+
+    if "readtype" in keys:
+        val_readtype = mydict["readtype"]
+        if val_readtype.lower() not in ["incremental", "full"]:
+            str1 += " && Invalid data on: %s" % "readtype"
+            # Script will exit with error
+            script_exit = True
+            RC = 5
+
+    if "rotation" in keys:
+        val_readtype = mydict["rotation"]
+        if val_readtype.lower() not in ["y", "n", "delete"]:
+            str1 += " && Invalid data on: %s" % "rotation"
+            # Script will exit with error
+            script_exit = True
+            RC = 5
+
+    if "alarmonerror" in keys:
+        val_readtype = mydict["alarmonerror"]
+        if val_readtype.lower() not in ["y", "n"]:
+            str1 += " && Invalid data on: %s" % "alarmonerror"
+            # Script will exit with error
+            script_exit = True
+            RC = 5
+
+    if "deduplicate" in keys:
+        val_readtype = mydict["deduplicate"]
+        if val_readtype.lower() not in ["y", "n"]:
+            str1 += " && Invalid data on: %s" % "deduplicate"
+            # Script will exit with error
+            script_exit = True
+            RC = 5
+
+    if script_exit:
+        logging.error(str1)
+        logging.error("Parameter is missing/invalid: %s" % str1)
+
+        OUT_ITEM_SAMPLE["rc"] = RC
+        write_data_outfile(OUT_ITEM_SAMPLE)  # Append the data into output file
 
     return str1
+
+
+def valid_yaml_format(filename, dump_data, valid_type):
+    """
+    Check if the dump data from filename is valid for type of 'valid_type'
+    :param filename:
+    :param dump_data:
+    :param valid_type: Type of either list or dict
+    :return:
+    """
+    global OUT_ITEM_SAMPLE
+    # print(filename)
+    # print(dump_data)
+    # print(valid_type)
+    #
+    # Check if the YAML file is valid (list data type)
+    if valid_type == "list":
+        if not isinstance(dump_data, list):
+            RC = 4
+            logging.error("YAML file format is invalid: %s" % filename)
+
+            OUT_ITEM_SAMPLE["rc"] = RC
+            write_data_outfile(OUT_ITEM_SAMPLE)  # Append the data into output file
+    elif valid_type == "dict":
+        if not isinstance(dump_data, dict):
+            RC = 4
+            logging.error("YAML file format is invalid: %s" % filename)
+
+            OUT_ITEM_SAMPLE["rc"] = RC
+            write_data_outfile(OUT_ITEM_SAMPLE)  # Append the data into output file
+
+    return
+
+def process_already_running(process_name):
+    """
+    If the process (no case sensitive) is already running or not
+    :param process_name: The process identified by "ps -ef"
+    :return: Boolean, True or False
+    """
+    p = subprocess.Popen(['ps', '-ef'], stdout=subprocess.PIPE)
+    out, err = p.communicate()
+
+    process_duplicate = False
+    process_running = False
+    for line in out.splitlines():
+        line = str(line, encoding='utf-8').lower()
+        if process_name.lower() in str(line):
+            if not process_running:
+                # For the first discovered running process
+                # Get the pid and ppid for 'ps aux'
+                pid = int(line.split()[1])
+                ppid = int(line.split()[2])
+                process_running = True
+
+                # print("1st: %d %d" % (pid, ppid))
+                # print(line)
+            else:
+                pid2 = int(line.split()[1])
+                ppid2 = int(line.split()[2])
+                if pid2 == ppid or ppid2 == pid:
+                    # Skip for the process is the parent or child of first discovered process
+                    # print("others (not Kill): %d %d" % (pid, ppid))
+                    # print(line)
+                    continue
+                else:
+                    process_duplicate = True
+                    break
+                    # It is NOT the first discovered running process
+                    # print("others (will be killed): %d %d" % (pid, ppid))
+                    # print(line)
+    return process_duplicate
 
 
 def main():
     global CONFIG_FILE, PARAM_FILE, OUT_FILE, OUT_SAMPLE
     global OUT_ITEM_SAMPLE, SCRIPT_INTERVAL_RUN
 
-    global FORMAT_FILE, SCRIPT_INTERVAL_READ
+    global FORMAT_FILE
 
     OUT_ITEM_SAMPLE = {}
 
@@ -376,13 +477,21 @@ def main():
         f.write("logicalname     logfilename      0\n")
 
     try:
+        RC = 0
         while True:
             # Get args
             argv = sys.argv
             logging.info(argv)
             mydict = get_argv_dict(argv)
 
-            # Validate the imput parameters
+            # Return the version
+            if "-v" in mydict.keys():
+                print(VERSION)
+                # Clear temparory files
+                if os.path.isfile(LAST_CHECKED_LINE):
+                    os.remove(LAST_CHECKED_LINE)
+                RC = 0
+                raise SystemExit(RC)
 
             # Check the required parameter/s
             para = ["-m"]
@@ -394,38 +503,43 @@ def main():
             script_mode = mydict.get("-m").lower()
             if script_mode not in ["run", "read"]:
                 logging.error("The value of '- m' is not valid: %s" % script_mode)
-                # Write the wrong message to output with rc & rcdesc
-                pass
-
                 usage()
 
             # Check the optional parameter/s
             if script_mode == "run":
-                para = ["script", "-m", "-p", "-o", "-h"]
+                para = ["script", "-m", "-p", "-o", "-h", "-v"]
             else:
-                para = ["script", "-m", "-f", "-o", "-h"]
+                para = ["script", "-m", "-f", "-o", "-h", "-v"]
 
             if check_valid_parameters(mydict, para):
                 logging.error("The parameter %s is/are not supported!!!" % check_valid_parameters(mydict, para))
-                # Write the wrong message to output with rc & rcdesc
-                pass
-
                 usage()
 
             if script_mode == "run":
+                # exit if another deamon/process is already running for 'run'
+                names = ["LogfileMonitor -m run", "LogfileMonitor.py -m run"]
+                for name in names:
+                    if process_already_running(name):
+                        print("The process(%s) is already running, Please verify with 'ps -f' command!!!" % name)
+                        RC = 7
+                        raise SystemExit(RC)
+
                 # with RUN mode
                 logging.info("file is:%s" % PARAM_FILE)
 
-                if mydict.get("-c"):
+                keys = mydict.keys()
+                if "-c" in keys:
                     CONFIG_FILE = mydict["-c"]
-                if mydict.get("-p"):
+                if "-p" in keys:
                     PARAM_FILE = mydict["-p"]
-                if mydict.get("-o"):
+                if "-o" in keys:
                     OUT_FILE = mydict["-o"]
 
                 logging.info(PARAM_FILE)
 
                 out_data = get_from_yaml(OUT_SAMPLE)  # Get data from sample file
+                # Check if the YAML file is valid (list data type)
+                valid_yaml_format(OUT_SAMPLE, out_data, "list")
 
                 # Clear the data, and only keep the keys and default values, and save it as output sample data
                 for k in out_data[0].keys():
@@ -438,13 +552,12 @@ def main():
                 # Get parameters from file
                 mylist_param = get_from_yaml(PARAM_FILE)
                 logging.debug("data for parameter file:\n %s" % mylist_param)
+                # Check if the YAML file is valid (list data type)
+                valid_yaml_format(PARAM_FILE, mylist_param, "list")
 
-                # Validate the parameters of every item in config file
-                for i in mylist_param:
-                    if valid_para_config_file(i):
-                        # If there is any invalid parameters include, or any invalid contents for any parameter
-                        #print(valid_para_config_file(i))
-                        pass
+                # Check if the parameters are valid
+                for i in range(len(mylist_param)):
+                    valid_para_config_file(mylist_param[i])
 
                 # Translate the parameters to every patternsearch
                 mylist_pattern = []
@@ -460,7 +573,7 @@ def main():
                 mylist_logfile = trans_pattern_logfile(mylist_pattern)
 
                 if len(mylist_logfile) == 0:
-                    print("There is not any exactly match logfilename.")
+                    logging.warning("There is not any exactly match logfilename.")
                 else:
                     logging.debug("All the search patterns with exact logfilename:")
                     for i in range(len(mylist_logfile)):
@@ -584,7 +697,7 @@ def main():
                             for k in range(len(matched_lines_new)):
                                 if matched_lines_new[k]["matched_contents"] == line_content:  # Exact match
                                     found = True
-                                    if matched_lines_new[k].get("num"):
+                                    if "num" in matched_lines_new[k].keys():
                                         matched_lines_new[k]["num"] += 1  # if line exists
                                     else:
                                         matched_lines_new[k]["num"] = 1  # if line is new
@@ -624,19 +737,26 @@ def main():
                         #
                         # # Update the output contents with combination
                         out_item_temp["resource"] = "%s:%s:%s:%s" % (
-                            mylist_logfile_entry["logfilename"], mylist_logfile_entry["eventtype"],
-                            mylist_logfile_entry["logfield1"], mylist_logfile_entry["logfield2"])
+                            mylist_logfile_entry["logfilename"] if mylist_logfile_entry.get("logfilename") else "",
+                            mylist_logfile_entry["eventtype"] if mylist_logfile_entry.get("eventtype") else "",
+                            mylist_logfile_entry["logfield1"] if mylist_logfile_entry.get("logfield1") else "",
+                            mylist_logfile_entry["logfield2"] if mylist_logfile_entry.get("logfield2") else "")
+
+                        out_item_temp["responsible"] = mylist_logfile_entry["responsible"] \
+                            if mylist_logfile_entry.get("responsible") else ""
 
                         out_item_temp["actualnumberofhits"] = matched_lines_new[j]["num"] \
                             if matched_lines_new[j].get("num") else 0  # Update the number of hits
                         out_item_temp["message"] = matched_lines_new[j]["matched_contents"] \
                             if matched_lines_new[j].get("matched_contents") else ""
+
                         # Update the message with line's content
 
                         # Set default rc & rcdesc
                         if out_item_temp["rc"] == '':
                             # set default
-                            out_item_temp["rc"] = 0
+                            RC = 0
+                            out_item_temp["rc"] = RC
 
                         # Write data to output file
                         write_data_outfile(out_item_temp)
@@ -699,17 +819,27 @@ def main():
                 # logging.debug(os.system('cat LAST_CHECKED_LINE'))
 
                 # Sleep to next interval
-                time.sleep(SCRIPT_INTERVAL_RUN * 60)
+                time.sleep(SCRIPT_INTERVAL_RUN)
                 # print("RUN in next cycle...")
             else:
+                # exit if another deamon/process is already running for 'run'
+                names = ["LogfileMonitor -m read", "LogfileMonitor.py -m read"]
+                for name in names:
+                    if process_already_running(name):
+                        print("The process(%s) is already running, Please verify with 'ps -f' command!!!" % name)
+                        RC = 7
+                        raise SystemExit(RC)
+
                 # with READ mode
                 # print("running with READ mode")
-                if mydict.get("-o"):
+                if "-o" in mydict.keys():
                     OUT_FILE = mydict.get("-o")
-                if mydict.get("-f"):
+                if "-f" in mydict.keys():
                     FORMAT_FILE = mydict.get("-f")
 
                 out_format = get_from_yaml(FORMAT_FILE)  # Get data from format file
+                # Check if the YAML file is valid (dictionary data type)
+                valid_yaml_format(FORMAT_FILE, out_format, "dict")
 
                 # Valid the format
                 para = ["separator", "fields"]
@@ -717,81 +847,117 @@ def main():
                 if check_required_parameters(out_format, para):
                     logging.error("The required parameter is missing: %s" % check_required_parameters(out_format, para))
                     print("The required parameter is missing: %s" % check_required_parameters(out_format, para))
-                    exit(1)
+                    RC = 1
+                    raise SystemExit(RC)
 
                 output_string_format = out_format["separator"].join(out_format["fields"].split())
                 logging.debug("The output string format is:\n%s" % output_string_format)
 
-                out_data = get_from_yaml(OUT_FILE)  # Get data from sample file
+                # out_data = get_from_yaml(OUT_FILE)  # Get data from sample file
+                # # Check if the YAML file is valid (list data type)
+                # valid_yaml_format(OUT_FILE, out_data, "list")
 
-                if out_data:
-                    # If there is any data read into
-                    # noinspection PyPep8Naming
-                    OUTPUT_ITEMS = []
-                    updated_yn = False
-                    for item in out_data:
-                        # run a loop with: if is it un-read, append the item to OUTPUT_ITEMS
-                        if item["readout"].lower() == "n":
-                            # append it
-                            OUTPUT_ITEMS.append(item)
-                            # update t
-                            item["readout"] = "Y"
-                            updated_yn = True
+                try:
+                    with open(OUT_FILE) as f:
+                        out_data = yaml.load(f)
 
-                    logging.debug("The un-read items are: ")
-                    logging.debug(OUTPUT_ITEMS)
+                    if out_data:
+                        # If there is any data read into
+                        # noinspection PyPep8Naming
+                        OUTPUT_ITEMS = []
+                        updated_yn = False
+                        script_exit = False
+                        str1 = ""
+                        for item in out_data:
+                            # Check if the all the fields are can be read out
+                            keys = list(item.keys())
+                            for item_key in list(out_format["fields"].split()):
+                                if item_key not in keys:
+                                    RC = 6
+                                    script_exit = True
+                                    str1 += "%s;" % item_key
+                            # run a loop with: if is it un-read, append the item to OUTPUT_ITEMS
+                            if item["readout"].lower() == "n":
+                                # append it
+                                OUTPUT_ITEMS.append(item)
+                                # update t
+                                item["readout"] = "Y"
+                                updated_yn = True
+                            if script_exit:
+                                logging.warning("Parameter is missing: %s" % str1)
+                                print("Script exit with error: %s" % str1)
+                                raise SystemExit(RC)
 
-                    if updated_yn:
-                        result = yaml.dump(out_data, default_flow_style=False)
+                        logging.debug("The un-read items are: ")
+                        logging.debug(OUTPUT_ITEMS)
 
-                        # Writ the data back to file: OUT_FILE
-                        with open("%s-bak" % OUT_FILE, 'w') as f:
-                            # write out_data to the -bak file
-                            f.write(result)
+                        if updated_yn:
+                            result = yaml.dump(out_data, default_flow_style=False)
 
-                        # Do not check if OUT_FILE was updated by RUN mode in above duration
-                        os.remove(OUT_FILE)
-                        os.rename("%s-bak" % OUT_FILE, OUT_FILE)
+                            # Writ the data back to file: OUT_FILE
+                            with open("%s-bak" % OUT_FILE, 'w') as f:
+                                # write out_data to the -bak file
+                                f.write(result)
 
-                    out_data = []
+                            # Do not check if OUT_FILE was updated by RUN mode in above duration
+                            os.remove(OUT_FILE)
+                            os.rename("%s-bak" % OUT_FILE, OUT_FILE)
 
-                    # Generate Standard Output for OUTPUT_ITEMS with OUT_FILE format
-                    if OUTPUT_ITEMS:
-                        output_string_format = ""
+                        out_data = []
 
-                        out_format = get_from_yaml(FORMAT_FILE)  # Get data from sample file
+                        # Generate Standard Output for OUTPUT_ITEMS with OUT_FILE format
+                        if OUTPUT_ITEMS:
+                            output_string_format = ""
 
-                        separator = out_format["separator"]
-                        fields = out_format["fields"]
-                        # output_string_format = out_format["separator"].join(out_format["fields"].split())
-                        # logging.debug("The output string format is:\n%s" % output_string_format)
+                            out_format = get_from_yaml(FORMAT_FILE)  # Get data from sample file
+                            # Check if the YAML file is valid (dictionary data type)
+                            valid_yaml_format(FORMAT_FILE, out_format, "dict")
 
-                        for item in OUTPUT_ITEMS:
-                            logging.debug("The item is: ")
-                            logging.debug(item)
-                            #                print(item)
-                            # return the item contents with output_string_format format
-                            output_string = separator
-                            for key in fields.split():
-                                if str(item.get(key)):
-                                    output_string = "%s%s%s" % (output_string, separator, item[key])
-                                else:
-                                    logging.error(
-                                        "The key of %s maybe wrong to defined in file: %s" % (key, OUT_FILE))
-                                    print("ERROR The key of %s maybe wrong to defined in file: %s" % (key, OUT_FILE))
-                                    output_string = "%s%sNULL" % (output_string, separator)
+                            separator = out_format["separator"]
+                            fields = out_format["fields"]
+                            # output_string_format = out_format["separator"].join(out_format["fields"].split())
+                            # logging.debug("The output string format is:\n%s" % output_string_format)
 
-                            output_string = output_string.strip(separator)
-                            print(output_string)
-                else:
-                    logging.debug("There is not any data for input from file: %s" % OUT_FILE)
+                            for item in OUTPUT_ITEMS:
+                                logging.debug("The item is: ")
+                                logging.debug(item)
+                                #                print(item)
+                                # return the item contents with output_string_format format
+                                output_string = separator
+                                for key in fields.split():
+                                    if str(item.get(key)):
+                                        output_string = "%s%s%s" % (output_string, separator, item[key])
+                                    else:
+                                        logging.error(
+                                            "The key of %s maybe wrong to defined in file: %s" % (key, OUT_FILE))
+                                        # print("ERROR The key of %s maybe wrong to defined in file: %s" % (key, OUT_FILE))
+                                        output_string = "%s%sNULL" % (output_string, separator)
 
-                time.sleep(SCRIPT_INTERVAL_READ * 60)
+                                output_string = output_string.strip(separator)
+                                print(output_string)
+                    else:
+                        logging.debug("There is not any data for input from file: %s" % OUT_FILE)
+                except IOError:
+                    logging.warning("The file is not existing: %s" % OUT_FILE)
+                    RC = 22
+
+                # READ runs once and then exit
+                # time.sleep(SCRIPT_INTERVAL_READ * 60)
+                break
+        # Exit with RC
+        raise SystemExit(RC)
+
+    except SystemExit as e:
+        if os.path.isfile(LAST_CHECKED_LINE):
+            os.remove(LAST_CHECKED_LINE)
+
+        sys.exit(e)
     finally:
         # Clear temparory files
         if os.path.isfile(LAST_CHECKED_LINE):
             os.remove(LAST_CHECKED_LINE)
     # End of Main
+
 
 if __name__ == "__main__":
     try:
