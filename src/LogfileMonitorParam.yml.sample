@@ -1,0 +1,51 @@
+# LogfileMonitorParam.yml.sample
+# It applies standard YAML format;
+# It will be called by RUN mode;
+############################################################
+- logicalname: "logfile-messages"          # Logical name of Logfile monitoring
+  logfilename: "/home/xiaojias/demo/20190416/messages"      # Monitored file/s, supports regex
+  instance: "logfile"                        # To indentify the event type relating to any application
+  eventtype: "Application"
+  readtype: "full"                 # incremental/full
+  rotation: "y"                           # y/n/delete rotate existing log file/Do nothing/Delete log file
+  deduplicate: "y"                        # Indicates if lines with same content should be deduplicated
+  occurences: "1"                          # Defines how many matches should occur before triggering an event
+  responsible: "Support Application 001"
+  patternmatch:
+  - severity: "sev1"
+    patternsearchtype: "substring"               # Specity if line should start with given pattern, ends with it, be a substring or the full line, or a regexp
+    patternsearch: 'systemd-logind: New session'
+    alarmonerror: "y"
+    alarmonerrorsev: ""
+    clearmatch: ""
+    logfield1: ""
+    logfield2: ""
+    sevmap: "critical"                          # Severity to be used on the event
+  - severity: "sev2"
+    patternsearchtype:  "substring"               # Specity if line should start with given pattern, ends with it, be a substring or the full line, or a regexp
+    patternsearch: "WARNING - The file is not existing"
+    alarmonsev: "Y"
+    clearmatch: ""
+    logfield1: ""
+    logfield2: ""
+    sevmap: "major"                          # Severity to be used on the event
+- logicalname: "logfile-secure"          # Logical name of Logfile monitoring
+  logfilename: "/home/xiaojias/demo/20190416/secure"      # Monitored file/s, supports regex
+  instance: "logfile"                        # <Optional> To indentify the event type relating to any application
+  eventtype: "Application"        # <Optional> Default is: ???
+  readtype: "incremental"                 # Incremental/Full
+  rotation: "n"                           # Y/N/Delete Rotate existing log file/Do nothing/Delete log file
+  deduplicate: "y"                        # Indicates if lines with same content should be deduplicated
+  occurences: "1"                          # Defines how many matches should occur before triggering an event
+  responsible: "Support Application 001"
+  patternmatch:
+  - severity: "sev1"
+    patternsearchtype:  "regexp"               # Specity if line should start with given pattern, ends with it, be a substring or the full line
+    patternsearch: 'pam_unix\(sshd:session\): session closed'
+    alarmonerror: "Y"
+    alarmonerrorsev: ""
+    clearmatch: ""
+    logfield1: ""
+    logfield2: ""
+    sevmap: "critical"                          # Severity to be used on the event
+# can set others below started by "logicalname" property
