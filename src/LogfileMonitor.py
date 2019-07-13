@@ -9,12 +9,22 @@
 # 20190414-XJS : 1.0       Improved, E.g remove RC_FILE                                           #
 # 20190422-XJS : 1.0       Improvement for RTC:501606                                             #
 # 20190424-XJS : 1.0       Process errors and use the same output                                 #
+# 20190528-XJS : 1.0       Maintain logs with rotation mechanism                                  #
+# 20190626-XJS : 1.1       - Error message with RUN mode can be read by READ mode;                #
+#                          - REQ3: Check logfile from beginning while it is trimmed;              #
+#                          - REQ8: Change exactly to full for PatternSearchType;                  #
+#                          - REQ13: Add matched entries in RUN mode while counter of matches is   #
+#                                   above occurrence;                                             #
+#                          - REQ14: Generate event by READ mode while in TTL;                     #
+#                          - REQ15: extract fields for logfield1, logfield2 from matched entries; #
+#                          - Set TTL as 99 if it is missing in parameter file;                    #
 ###################################################################################################
 # Search the pattern from the monitored log file/s, and generate the output with defined format
 
 """
 import copy
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import re
 import sys
@@ -22,7 +32,7 @@ import time
 import subprocess
 import yaml
 
-VERSION = "1.0 20190424"
+VERSION = "1.1 20190628"
 
 SCRIPT_NAME = os.path.basename(__file__)
 
@@ -88,6 +98,13 @@ else:
     logging.basicConfig(filename='/tmp/%s' % SCRIPT_NAME.replace(".py", ".log"),
                         level=logging.WARNING,
                         format='%(asctime)s - %(levelname)s - %(message)s')
+
+# 20190528-XJS : 1.0
+Rhandler = RotatingFileHandler(filename='/tmp/%s' % SCRIPT_NAME.replace(".py", ".log"),
+                               maxBytes=2 * 1024 * 1024,
+                               backupCount=2)
+logging.getLogger('').addHandler(Rhandler)
+logging.getLogger()
 
 
 def usage():
@@ -349,7 +366,7 @@ def valid_para_config_file(mydict):
     # str1 = ""
     script_exit = False
     # The required parameters
-    para = ["logfilename", "logicalname", "instance", "eventtype", "readtype", "rotation", "deduplicate", "occurences",
+    para = ["logfilename", "logicalname", "instance", "eventtype", "readtype", "rotation", "deduplicate", "occurrences",
             "responsible"]
 
     str1 = check_required_parameters(mydict, para)
@@ -397,7 +414,8 @@ def valid_para_config_file(mydict):
         item = mydict["patternmatch"][i]
         if "patternsearchtype" in item.keys():
             val_readtype = item["patternsearchtype"].lower()
-            if val_readtype not in ["starts with", "ends with", "substring", "exactly", "regexp"]:
+            if val_readtype not in ["starts with", "ends with", "substring", "full", "regexp"]:
+                # Modified for REQ8
                 str1 += " && Invalid: %s" % "patternsearchtype"
                 script_exit = True
                 RC = 5
@@ -561,7 +579,9 @@ def main():
         # Create a new one if it does not exist
         if not os.path.isfile(LAST_CHECKED_LINE):
             with open(LAST_CHECKED_LINE, 'w') as f:
-                f.write("logicalname     logfilename      0\n")
+                # f.write("logicalname     logfilename      0\n")
+                # Modified for REQ3, add filesize as the last column
+                f.write("logicalname     logfilename      0      0\n")
 
         OUT_ITEM_SAMPLE = {}
 
@@ -573,7 +593,8 @@ def main():
                 for name in names:
                     if sys.platform == "linux":
                         if process_already_running(name):
-                            logging.error("The process(%s) is already running, Please verify with 'ps -f' command!!!" % name)
+                            logging.error(
+                                "The process(%s) is already running, Please verify with 'ps -f' command!!!" % name)
                             RC = 7
                             raise SystemExit(RC)
                     else:
@@ -603,6 +624,11 @@ def main():
                 # Translate the parameters to every patternsearch
                 mylist_pattern = []
                 mylist_pattern = trans_param_pattern(mylist_param, mylist_pattern)
+                # Add default value into if it is missing in parameter file
+                for k in range(len(mylist_pattern)):
+                    if mylist_pattern[k].get("ttl") == None:
+                        mylist_pattern[k]["ttl"] = 99
+
                 logging.debug("data for patterns:\n%s" % mylist_pattern)
 
                 # debugging: list out all the search patterns
@@ -642,8 +668,9 @@ def main():
                         search_str = mylist_logfile_entry["patternsearch"]  # regural expression
                         read_type = mylist_logfile_entry["readtype"].lower()  # incremental/full
 
-                        logging.debug("Start to search: \npatternsearch: %s  readtype: %s \nlogfilename: %s"
-                                      % (search_str, read_type, logfilename))
+                        logging.debug(
+                            "Start to search: \npatternsearch: %s  readtype: %s \nlogfilename: %s \npatternsearchtype: %s"
+                            % (search_str, read_type, logfilename, search_type))
                         matched_lines = []  # Record the matched lines' contents, an item per matched line' content
                         # The data should like:
                         # [{line: $line}, {line: $line}]
@@ -652,17 +679,18 @@ def main():
                         last_number = 0
                         logicalname = mylist_logfile_entry["logicalname"]
                         logfilename = mylist_logfile_entry["logfilename"]
+                        file_size = 0
                         with open(LAST_CHECKED_LINE, 'r') as f:
                             for line in f:
-
-                                if len(line.split()) >= 3:
+                                if len(line.split()) >= 4:
                                     if line.split()[0] == logicalname and line.split()[1] == logfilename:
                                         # The first field is the logfile name
                                         last_number = int(line.split()[2])
+                                        file_size = int(line.split()[3])
                                         break
                                 else:
                                     logging.warning(
-                                        "There not so many fields defined in file(>=3): %s" % LAST_CHECKED_LINE)
+                                        "There not so many fields defined in file(>=4): %s" % LAST_CHECKED_LINE)
 
                         # search the pattern in logfilename
                         logging.debug("Search the pattern in logfilename")
@@ -671,8 +699,13 @@ def main():
                             # skip to the last checked line for "readtype: incremental"
                             logging.debug("Skip to the last checked line")
                             if read_type == "incremental":
-                                for ii in range(0, last_number):
-                                    dummy = f.readline()
+                                if os.path.getsize(logfilename) >= file_size:
+                                    # For REQ3, while logfilename is NOT trimmed, skip to the already read lines
+                                    for ii in range(0, last_number):
+                                        dummy = f.readline()
+                                else:
+                                    last_number = 0
+                                file_size = os.path.getsize(logfilename)
 
                             # search the pattern
                             while True:
@@ -695,7 +728,7 @@ def main():
                                     elif search_type == "substring":
                                         if line.find(search_str) >= 0:
                                             matched_lines.append(dict(matched_contents=search_str))
-                                    elif search_type == "exactly":
+                                    elif search_type == "full":
                                         if line == search_str:
                                             matched_lines.append(dict(matched_contents=search_str))
                                 else:
@@ -704,7 +737,8 @@ def main():
                             # Save the last_number for every logicalname & logfilename to list variable: last_line_list
                             # Only when read_type is "incremental"
                             if read_type == "incremental":
-                                logging.debug("Save the last_number for every logicalname & logfilename to list: \n")
+                                logging.debug(
+                                    "Save the last_number and filesize for every logicalname & logfilename to list: \n")
                                 existing_YN = False
                                 # Check if the last_number is already exising for logicalname & logfilename
                                 for item in last_line_list:
@@ -712,11 +746,14 @@ def main():
                                         # noinspection PyPep8Naming
                                         existing_YN = True
                                         item["last_number"] = last_number
+                                        # for REQ3
+                                        item["file_size"] = file_size
 
                                 if not existing_YN:
                                     # Append it as new one
                                     last_line_list.append(
-                                        dict(logicalname=logicalname, logfilename=logfilename, last_number=last_number))
+                                        dict(logicalname=logicalname, logfilename=logfilename, last_number=last_number,
+                                             file_size=file_size))
                                     existing_YN = True
 
                                 logging.debug(last_line_list)
@@ -772,20 +809,36 @@ def main():
                             #     out_item_temp[key] = mylist_logfile_entry[key]
                             out_item_temp["logeventtype"] = mylist_logfile_entry["eventtype"]
                             #
-                            # Update the output contents with combination
-                            out_item_temp["resource"] = "%s:%s:%s:%s:%s" % (
-                                mylist_logfile_entry.get("instance", ""),
-                                mylist_logfile_entry.get("logfilename", ""),
-                                mylist_logfile_entry.get("eventtype", ""),
-                                mylist_logfile_entry.get("logfield1", ""),
-                                mylist_logfile_entry.get("logfield2", "")
-                            )
 
                             out_item_temp["responsible"] = mylist_logfile_entry.get("responsible", "")
 
                             out_item_temp["actualnumberofhits"] = matched_lines_new[j].get("num",
                                                                                            0)  # Update the number of hits
                             out_item_temp["message"] = matched_lines_new[j].get("matched_contents", "")
+
+                            # REQ15: Get values for logfield1 & 2 from matched_lines_new[j].get("matched_contents")
+                            out_item_temp["logfield1"] = ''
+                            if mylist_logfile_entry.get("logfield1"):
+                                res = re.search(mylist_logfile_entry.get("logfield1"),
+                                                matched_lines_new[j].get("matched_contents"))
+                                if res:
+                                    out_item_temp["logfield1"] = res.group()
+
+                            out_item_temp["logfield2"] = ''
+                            if mylist_logfile_entry.get("logfield2"):
+                                res = re.search(mylist_logfile_entry.get("logfield2"),
+                                                matched_lines_new[j].get("matched_contents"))
+                                if res:
+                                    out_item_temp["logfield2"] = res.group()
+
+                            # Update the output contents with combination
+                            out_item_temp["resource"] = "%s:%s:%s:%s:%s" % (
+                                mylist_logfile_entry.get("instance", ""),
+                                mylist_logfile_entry.get("logfilename", ""),
+                                mylist_logfile_entry.get("eventtype", ""),
+                                out_item_temp["logfield1"],
+                                out_item_temp["logfield2"]
+                            )
 
                             # Update the message with line's content
 
@@ -796,7 +849,11 @@ def main():
                                 out_item_temp["rc"] = RC
 
                             # Write data to output file
-                            write_data_outfile(out_item_temp)
+                            # REQ13
+                            occurrences = int(mylist_logfile_entry.get("occurrences", 1))
+
+                            if out_item_temp["actualnumberofhits"] >= occurrences:
+                                write_data_outfile(out_item_temp)
 
                             out_item_temp.clear()  # Clear for next searching
 
@@ -812,15 +869,19 @@ def main():
                             # If LAST_CHECKED_LINE has, but last_line_list has not, copy it to "-bak" file;
                             # Both LAST_CHECKED_LINE and last_line_list have, write it with last_line_list value;
                             for line in f1:
-                                l_logicalname, l_logfilename, l_number = line.split()
+                                l_logicalname, l_logfilename, l_number, l_size = line.split()
                                 existing_yn = False
                                 for item in last_line_list:
                                     logicalname = item["logicalname"]
                                     logfilename = item["logfilename"]
                                     number = item["last_number"]
+                                    # for REQ3
+                                    size = item["file_size"]
                                     if logicalname == l_logicalname and logfilename == l_logfilename:
                                         existing_yn = True
-                                        f2.write("%s  %s  %d\n" % (logicalname, logfilename, number))
+                                        # For REQ3, write the filesize into
+                                        size = os.path.getsize(logfilename)
+                                        f2.write("%s  %s  %d %d\n" % (logicalname, logfilename, number, size))
                                         break
                                 if not existing_yn:
                                     f2.write(line)
@@ -841,15 +902,16 @@ def main():
                             logicalname = item["logicalname"]
                             logfilename = item["logfilename"]
                             number = item["last_number"]
+                            size = item["file_size"]
                             with open(LAST_CHECKED_LINE, 'r') as f1, open("%s-bak" % LAST_CHECKED_LINE, 'a') as f2:
                                 existing_yn = False
                                 for line in f1:
-                                    l_logicalname, l_logfilename, l_number = line.split()
+                                    l_logicalname, l_logfilename, l_number, l_size = line.split()
                                     if logicalname == l_logicalname and logfilename == l_logfilename:
                                         existing_yn = True
                                         break
                                 if not existing_yn:
-                                    f2.write("%s  %s  %d\n" % (logicalname, logfilename, number))
+                                    f2.write("%s  %s  %d  %d\n" % (logicalname, logfilename, number, size))
 
                         os.remove(LAST_CHECKED_LINE)
                         os.rename("%s-bak" % LAST_CHECKED_LINE, LAST_CHECKED_LINE)
@@ -866,7 +928,8 @@ def main():
                 for name in names:
                     if sys.platform == "linux":
                         if process_already_running(name):
-                            logging.error("The process(%s) is already running, Please verify with 'ps -f' command!!!" % name)
+                            logging.error(
+                                "The process(%s) is already running, Please verify with 'ps -f' command!!!" % name)
                             RC = 7
                             raise SystemExit(RC)
                     else:
@@ -905,9 +968,11 @@ def main():
                                     for item_key in list(READ_OUTPUT_FORMAT["fields"].split()):
                                         # If all the required are defined or not
                                         if item_key not in keys:
-                                            RC = 9
-                                            script_exit = True
-                                            str1 += "%s@%s;" % (item_key, item["timestamp"])
+                                            # RC = 9
+                                            # script_exit = True
+                                            # str1 += "%s@%s;" % (item_key, item["timestamp"])
+                                            # Fill the field with value as NULL
+                                            item[item_key] = ""
                                     if script_exit:
                                         logging.error("Fields are missing from : %s" % str1)
                                         # print("Script exit with error: %s" % str1)
@@ -915,7 +980,13 @@ def main():
                                     else:
                                         # append it
                                         item["readout"] = "Y"
-                                        OUTPUT_ITEMS.append(item)
+
+                                        # REQ14
+                                        num_timestamp = int(item["timestamp"])
+                                        num_ttl = int(item["ttl"])
+                                        if num_ttl * 60 > int(time.time()) - num_timestamp:
+                                            OUTPUT_ITEMS.append(item)
+
                                         updated_yn = True
 
                             logging.debug("The un-read items are: ")
@@ -924,7 +995,10 @@ def main():
                             if updated_yn:
                                 # Write the 'READ' data to OUT_FILE instead
                                 # result = yaml.dump(out_data, default_flow_style=False)
-                                result = yaml.dump(OUTPUT_ITEMS, default_flow_style=False)
+                                if len(OUTPUT_ITEMS) == 0 :
+                                    result = ""
+                                else:
+                                    result = yaml.dump(OUTPUT_ITEMS, default_flow_style=False)
 
                                 # Writ the data back to file: OUT_FILE
                                 with open("%s-bak" % OUT_FILE, 'w') as f2:
@@ -933,6 +1007,13 @@ def main():
                                 # Do not check if OUT_FILE was updated by RUN mode in above duration
                                 os.remove(OUT_FILE)
                                 os.rename("%s-bak" % OUT_FILE, OUT_FILE)
+
+                                # 20190528-XJS : 1.0
+                                # Rotate the outfile with maxByte = 1M and 1 backup
+                                if os.path.getsize(OUT_FILE) > 1 * 1024 * 1024:
+                                    os.rename(OUT_FILE, "%s.1" % OUT_FILE)
+                                    with open(OUT_FILE, "w"):
+                                        print()
 
                             # Generate Standard Output for OUTPUT_ITEMS with OUT_FILE format
                             if OUTPUT_ITEMS:
@@ -963,8 +1044,8 @@ def main():
                     RC = 2
                     raise SystemExit(RC)
                 break
-        # Exit with RC
-        # raise SystemExit(RC)
+                # Exit with RC
+                # raise SystemExit(RC)
     except SystemExit as error_code:
         # Print desc for RC
         if str(error_code) != "0":
@@ -989,8 +1070,8 @@ def main():
         sys.exit(99)
     finally:
         pass
-    #     # Clear temparory files
-    # End of Main
+        #     # Clear temparory files
+        # End of Main
 
 
 if __name__ == "__main__":
